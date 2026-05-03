@@ -2,6 +2,9 @@
 
 Live telemetry dashboard for CESI École d'Ingénieurs' entry in the **24h de Stan**, a student endurance race held on Place de la Carrière, Nancy, France.
 
+<img width="1452" height="815" alt="image" src="https://github.com/user-attachments/assets/b92f3750-65cc-44c6-9a24-1eb65b31c535" />
+<p align="center"><i>AI-generated draft</i></p>
+
 ---
 
 ## 1. Context
