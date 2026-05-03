@@ -1,6 +1,6 @@
 # 24h de Stan — F1 Dashboard
 
-Live telemetry dashboard for CESI École d'Ingénieurs' entry in the **24h de Stan**, a student endurance race held on Place de la Carrière, Nancy, France.
+Dual-mode telemetry platform for CESI École d'Ingénieurs' entry in the **24h de Stan**, a student endurance race held on Place de la Carrière, Nancy, France.
 
 <img width="1452" height="815" alt="image" src="https://github.com/user-attachments/assets/b92f3750-65cc-44c6-9a24-1eb65b31c535" />
 <p align="center"><i>AI-generated draft</i></p>
@@ -10,33 +10,68 @@ Live telemetry dashboard for CESI École d'Ingénieurs' entry in the **24h de St
 ## 1. Context
 
 ### The race
+
 The **24h de Stan** is a student event in Nancy, France. Over a weekend, teams of students push (or in our case, pedal) decorated stripped-down cars around the **Place de la Carrière** for 24 hours. The "track" is a stadium-shaped loop with two long straights (~240 m each) and two tight semicircular turns at the east and west ends.
 
 ### Our entry
+
 - **Team**: CESI Nancy
 - **Brand colors**: Yellow (`#fbe216`) on black
 - **Event**: 24-hour endurance, ~Saturday noon → Sunday noon
 
 ### Goal of this artifact
-A single fixed-size **1920×1080 dashboard** designed to run on a TV at the team's stand. It must be:
+
+Two coordinated runtimes:
+- A fixed-size **1920×1080 kiosk dashboard** for the stand TV (Raspberry Pi).
+- A **mobile-first remote dashboard** hosted by the server for phones and off-site monitoring.
+
+Kiosk view must be:
 - Readable at **3–5 m** (typical viewing distance from stand)
 - Glanceable — a passer-by should grasp the team's status in <3 seconds
 - Self-updating with telemetry pulled from the on-car sensor unit
 - Visually striking enough to attract an audience
+
+### Runtime modes
+
+The app is designed to run in one of two modes at execution time:
+
+1. `kiosk`
+- Runs on the Raspberry Pi at the stand.
+- Reads incoming telemetry from the receiver Arduino over USB serial.
+- Validates and parses LoRa frames.
+- Computes `RaceStats`.
+- Persists raw + normalized telemetry to a **local SQLite database** on the Pi.
+- Serves the TV dashboard locally over HTTP/WebSocket.
+- Forwards telemetry snapshots/events to the remote `server` mode.
+
+2. `server`
+- Runs on a remote machine.
+- Receives telemetry forwarded by one or more kiosks.
+- Persists received telemetry/events to its own **local SQLite database**.
+- Serves a **mobile-first dashboard** for organizers/team members.
+- Evaluates alert rules and sends push notifications when:
+  - Battery is low.
+  - Data is malformed/inconsistent.
+  - GPS signal is lost/degraded.
+  - LoRa chain health indicates miscommunication.
+  - Raspberry Pi chain health indicates miscommunication.
 
 ---
 
 ## 2. Design choices
 
 ### Visual direction
+
 The chosen direction is **F1 broadcast aesthetic** — high-density chrome, yellow-on-black, condensed sans-serif, monospace numerals — combined with a **stylized satellite map** as the centerpiece (rather than the F1-typical mini-track). The map is the hero because it gives the audience an immediate "where is the car right now?" read that abstract track diagrams don't.
 
 ### Type system
+
 - **Display / UI sans**: Titillium Web (700–900). Geometric, condensed, broadcast-friendly.
 - **Numerals / mono**: JetBrains Mono (600–800), with `font-variant-numeric: tabular-nums` everywhere a number changes — keeps figures from jittering frame to frame.
 - **Minimum body size**: 17 px. Labels are 14–17 px, primary numerals 22–138 px.
 
 ### Color tokens
+
 | Token | Hex | Usage |
 |---|---|---|
 | `bg` | `#0a0a0a` | Page background |
@@ -57,6 +92,7 @@ The chosen direction is **F1 broadcast aesthetic** — high-density chrome, yell
 | `trackArea` | `#88795c` | Place de la Carrière sand |
 
 ### Layout
+
 A 3-column grid sitting under a 128 px header.
 
 ```
@@ -80,6 +116,7 @@ A 3-column grid sitting under a 128 px header.
 ```
 
 ### Map
+
 Stylized to read like a satellite view at a glance, but reduced to flat colored shapes for legibility from across the room:
 - **Track**: two-tone tarmac stroke with dashed yellow center line
 - **Buildings**: hatched pattern to suggest density without literal detail
@@ -92,9 +129,11 @@ Stylized to read like a satellite view at a glance, but reduced to flat colored 
 - **Vignette**: subtle radial dark edge to push focus inward
 
 ### Sectors
+
 We split the track at **turn boundaries** (not arbitrary 25/50/75% splits). Names: `S1 · NORTH STRAIGHT`, `S2 · EAST TURN`, `S3 · SOUTH STRAIGHT`, `S4 · WEST TURN`. Best sector times are highlighted purple per F1 convention.
 
 ### Information hierarchy (across-the-room read)
+
 1. **Speed** (138 px yellow numeral) and **Elapsed timer** (76 px) are the largest — readable from far back.
 2. **Lap number** (76 px yellow) anchors the top-right.
 3. **Map** with pulsing car pin is the second visual anchor — answers "where are they?".
@@ -103,9 +142,9 @@ We split the track at **turn boundaries** (not arbitrary 25/50/75% splits). Name
 
 ---
 
-## 3. Data model
+## 3. Data model and runtime architecture
 
-The dashboard consumes a single `RaceState` object refreshed at ~10 Hz. In the prototype this is generated by a deterministic simulator (`useRaceState` hook in `engine.jsx`); in production it would be fed by an ESP32 on the car (GPS + LoRa), received by an Arduino at the stand, then ingested over USB serial by a Raspberry Pi 3.
+The dashboards consume a single `RaceState` object refreshed at ~10 Hz. In production, this state is built in `kiosk` mode from ESP32 telemetry (GPS + LoRa), received by an Arduino at the stand, then ingested over USB serial by a Raspberry Pi.
 
 ### LoRa binary frame (on-wire format)
 
@@ -138,11 +177,43 @@ Each LoRa packet sent by the on-car ESP32 is exactly **26 bytes**, laid out as f
 | 4     | Recent reboot (first packet after power-on) |
 | 5–7   | Reserved |
 
-All higher-level statistics shown on the dashboard (lap times, sector splits, average speed, distance, calorie estimate, heatmap, etc.) are **computed from this raw frame** by the Bun backend.
+All higher-level statistics shown on both dashboards (lap times, sector splits, average speed, distance, calorie estimate, heatmap, etc.) are **computed from this raw frame** by the Bun backend.
 
 ### `RaceStats` — backend → frontend
 
-`RaceStats` is the object that the **Bun backend** builds from each incoming LoRa frame (after CRC validation, unit conversion, lap-detection, etc.) and pushes to the frontend via a **WebSocket** connection. Every field that the dashboard renders is derived from the raw binary frame above; nothing is sent to the browser that hasn't been computed server-side first.
+`RaceStats` is the object that the **Bun backend** builds from each incoming LoRa frame (after CRC validation, unit conversion, lap-detection, etc.) and pushes to frontends via **WebSocket**.
+
+- In `kiosk` mode, `RaceStats` is sent to the stand TV dashboard and forwarded upstream.
+- In `server` mode, forwarded `RaceStats` is ingested, stored, and rebroadcast to the mobile-first dashboard.
+
+Every field rendered in either UI is derived from the raw binary frame above; nothing is sent to the browser that hasn't been computed server-side first.
+
+### Persistence model (SQLite on both modes)
+
+Both modes persist telemetry to SQLite, for resilience and post-race analysis:
+
+- `kiosk` DB (edge copy on Raspberry Pi)
+  - Raw LoRa frames (for forensics/replay)
+  - Decoded telemetry samples
+  - Computed race snapshots (`RaceStats`)
+  - Forwarding queue / delivery status to server
+
+- `server` DB (central copy)
+  - Ingested telemetry snapshots by source kiosk
+  - Alert events and notification status
+  - Optional long-term aggregates (laps, sectors, incidents)
+
+This gives local survivability at the stand even if 4G drops, while preserving a central history for remote monitoring.
+
+### Chain health and alert events
+
+The server evaluates chain health from forwarded telemetry metadata and emits notification events. Typical categories:
+
+- `battery_low`: battery below threshold (for example < 20%).
+- `bad_data`: invalid CRC burst, impossible jumps, stale timestamps, schema mismatch.
+- `gps_signal_lost`: no fix, satellites too low, HDOP above threshold.
+- `lora_link_problem`: packet loss spikes, long radio silence, receiver-side decode errors.
+- `kiosk_link_problem`: kiosk heartbeat missing, forwarding backlog growing, server ingest timeout.
 
 ### `RaceState` shape
 
@@ -197,6 +268,7 @@ type WxCode = 'sun' | 'partly' | 'cloudy' | 'shower' | 'rain';
 ```
 
 ### Sensor inputs (physical)
+
 Minimum viable on-car kit:
 
 | Sensor | Purpose | Update | Notes |
@@ -209,104 +281,124 @@ Minimum viable on-car kit:
 | (optional) **Cadence sensor** | Pedal RPM → kcal refinement | 1 Hz | Improves calorie estimate vs. flat 7 kcal/min. |
 
 ### Telemetry pipeline
+
 ```mermaid
 flowchart LR
   A[On-car ESP32<br/>GPS module + LoRa]
   B[Receiver Arduino]
-  C[Raspberry Pi 3]
-  D[Remote server]
-  E[TV dashboard display]
+  C[Raspberry Pi kiosk mode]
+  D[(SQLite - kiosk)]
+  E[TV dashboard 1920x1080]
+  F[Remote server mode]
+  G[(SQLite - server)]
+  H[Mobile-first dashboard]
+  I[Push notifications]
 
   A -- LoRa 868 MHz --> B
   B -- USB serial --> C
-  C -- HDMI --> E
-  C -- 4G backup and remote access --> D
+  C -- persist --> D
+  C -- local WS/HTTP --> E
+  C -- forward telemetry/events --> F
+  F -- persist --> G
+  F -- WS/HTTP --> H
+  F -- alerts --> I
 ```
 
-The dashboard is a static HTML/JS bundle displayed directly from the Raspberry Pi 3 over HDMI on the stand TV. The **Bun backend** on the Pi reads USB serial frames from the receiver Arduino, parses each 26-byte LoRa frame, builds a fresh `RaceStats` JSON object roughly every ~100 ms, and **pushes it to the browser over a WebSocket** connection. It also forwards snapshots to a remote server over 4G for backup and remote access.
+In `kiosk` mode, the **Bun backend** on the Pi reads USB serial frames from the receiver Arduino, parses each 26-byte LoRa frame, builds a fresh `RaceStats` object roughly every ~100 ms, stores it in SQLite, serves it locally to the TV dashboard, and forwards snapshots to `server` mode.
+
+In `server` mode, the backend accepts forwarded telemetry, stores a second copy in SQLite, serves a mobile-first dashboard, and emits push notifications for operational issues.
 
 ### External data
-- **Lap progress `s`**: derived by projecting GPS lat/lon onto a precomputed centerline polyline of the Place de la Carrière loop (the centerline is hardcoded in `engine.jsx` as `TRACK`). Map-match every sample to nearest centerline segment, accumulate arc length.
+
+- **Lap progress `s`**: derived by projecting GPS lat/lon onto a precomputed centerline polyline of the Place de la Carrière loop (stored in the track-geometry module). Map-match every sample to nearest centerline segment, accumulate arc length.
 - **Weather**: pulled hourly from **Météo-France** public forecast API, keyed by Nancy lat/lon. The simulator currently fakes a plausible 24-hour pattern (sun → afternoon shower → overnight cloud → next-day sun); the production fetch should cache the response and refresh every 30–60 minutes.
 
 ---
 
-## 4. File structure
+## 4. Repository structure
 
 ```
-Perso - 24h stan/
-├── Dashboard.html              ← Entry point. Mounts a DesignCanvas with one
-│                                 1920×1080 artboard hosting <ComboDashboard />.
-├── design-canvas.jsx           ← Pan/zoom canvas wrapper (review tool only —
-│                                 not used at the stand; on race day, render
-│                                 ComboDashboard at fullscreen instead).
-├── engine.jsx                  ← Track geometry + race-state simulator.
-│                                 Exposes: TRACK, buildTrack, sectorOf,
-│                                 sectorBoundaryS, useRaceState, fmt,
-│                                 SECTOR_NAMES, getWeatherForecast.
-├── dashboard-combo.jsx         ← The dashboard itself (~400 lines).
-│                                 Exposes: ComboDashboard.
-└── tweaks-panel.jsx            ← (Unused in production; review-mode only.)
+24h-stan-dashboard/
+├── src/
+│   ├── index.ts                ← Bun entrypoint. Hosts HTTP routes and mode wiring.
+│   ├── index.html              ← Frontend shell.
+│   ├── frontend.tsx            ← React bootstrap.
+│   ├── App.tsx                 ← Dashboard app root.
+│   └── index.css               ← Styles (Tailwind import).
+├── build.ts                    ← Build script.
+├── package.json                ← Bun scripts and dependencies.
+└── README.md                   ← Project architecture and runtime docs.
 ```
 
-### Key utilities (`engine.jsx`)
+### Planned mode split (logical modules)
 
-- `buildTrack({ cx, cy, halfLen, radius })` — returns `{ d, length, pointAt(s) }`. `d` is an SVG `path` for a stadium loop centered at `(cx,cy)`. `pointAt(s)` returns `{x, y, heading}` where `s ∈ [0,1)`.
-- `sectorBoundaryS(i)` — returns the `s` value where sector `i` begins (4 sectors, split at turn entries/exits).
-- `sectorOf(s)` — returns 0..3.
-- `fmt.time(seconds)` → `"HH:MM:SS"` for the elapsed clock
-- `fmt.lap(seconds)` → `"M:SS.cs"` for a lap time
-- `fmt.delta(seconds)` → `"+0.42"` / `"-1.17"`
-- `fmt.dec(n, d)`, `fmt.int(n)` — numeric formatting
+As the platform evolves, the runtime is expected to be split logically as:
 
-### Dashboard structure (`dashboard-combo.jsx`)
+- `kiosk` domain
+  - Serial ingestion + LoRa decode
+  - Edge SQLite storage
+  - TV dashboard HTTP/WS serving
+  - Forwarder to server
 
-```
-<ComboDashboard width=1920 height=1080>
-  ├── <CmbTopBar>                    — header with logo, timer, sensor, lap
-  │     └── <CmbSensor>              — battery + satellites + signal bars
-  ├── <CmbLeft>                      — 440 px column
-  │     ├── <CmbPanel "SPEED">       — huge numeral + 50-bar mini-history
-  │     ├── <CmbPanel "VELOCITY 240s">  — waveform
-  │     └── <CmbPanel "STATS">       — distance, avg, top, kcal, pits
-  ├── <CmbCenter>                    — flexible center column
-  │     ├── <CmbPanel "PLACE DE LA CARRIÈRE · NANCY">
-  │     │     └── <CmbSatMap>        — the map (SVG, ~280 lines)
-  │     └── <LapProgress>            — bar + sector ticks + lap time
-  └── <CmbRight>                     — 440 px column
-        ├── <CmbPanel "LAP TIMES">   — best+last header, 8 recent
-        ├── <CmbPanel "SECTORS">     — 4 rows, active highlighted, best=purple
-        ├── <CmbWeather>             — now + next 3 hours, Météo-France
-        └── <CmbPanel "LATEST EVENTS"> — feed of best laps, pits, top speeds
-</ComboDashboard>
-```
+- `server` domain
+  - Forwarded telemetry ingest API
+  - Central SQLite storage
+  - Mobile-first dashboard HTTP/WS serving
+  - Alert engine + push provider adapter
+
+### UI surfaces by mode
+
+- `kiosk` UI (stand TV)
+  - 1920×1080 fixed-layout race dashboard
+  - Prioritizes glanceability from distance and live race status
+
+- `server` UI (remote)
+  - Mobile-first dashboard
+  - Prioritizes monitoring, incident visibility, and alert context for staff
 
 ---
 
-## 5. Reproducing this
+## 5. Running modes
 
 ### To run locally
-1. Clone / download the project folder.
-2. Serve the directory over HTTP (e.g. `python -m http.server`). File-protocol won't work because of Babel module fetches.
-3. Open `Dashboard.html` in Chrome. The DesignCanvas wrapper lets you zoom and focus the artboard.
+
+1. Install dependencies with `bun install`.
+2. Start in development with `bun run dev`.
+3. Open the URL printed by Bun.
+
+### Runtime mode selection
+
+At execution time, the app should run with a mode selector (recommended environment variable):
+
+- `APP_MODE=kiosk`
+- `APP_MODE=server`
+
+Expected behavior:
+
+- `kiosk`: serial ingest + local SQLite + TV dashboard + forward upstream.
+- `server`: ingest from kiosk + local SQLite + mobile-first dashboard + push alerts.
 
 ### To deploy at the stand
-1. Strip the DesignCanvas wrapper — replace the contents of the `App` function in `Dashboard.html` with a direct `<ComboDashboard />` render that auto-scales to viewport (use a CSS `transform: scale()` based on `window.innerWidth / 1920`).
-2. Replace `useRaceState` (the simulator) with a hook that opens a **WebSocket** connection to the local Bun backend on the Raspberry Pi 3 and merges incoming `RaceStats` messages into the component state.
-3. On the Raspberry Pi 3, run a small gateway service that reads USB serial data from the receiver Arduino, parses LoRa telemetry frames, maintains the latest `RaceState`, serves it locally to the dashboard, and forwards snapshots to a remote server over 4G.
-4. Connect the Raspberry Pi 3 HDMI output to the stand TV and run Chrome in kiosk mode on the Pi: `chrome --kiosk --disable-features=TranslateUI http://localhost:3000/Dashboard.html`.
 
-### To extend
-- **More sensors**: add fields to `RaceState`. Keep sensor health indicators in the header, performance data in the columns.
-- **Alerts**: a banner across the top of the center column when battery < 20%, signal lost > 10 s, or pit-stop required.
-- **Multi-car (if rules allow)**: the map and sector list already render generically — add a `cars: Car[]` field and iterate.
-- **Race playback**: log every `RaceState` to a JSONL file on the server. Replay by piping the log through the same WebSocket broadcaster at variable speed.
+1. Run the Bun service in `kiosk` mode on Raspberry Pi.
+2. Connect receiver Arduino over USB serial.
+3. Ensure kiosk SQLite database is writable on local storage.
+4. Connect Raspberry Pi HDMI to stand TV and open kiosk dashboard fullscreen.
+5. Configure upstream server endpoint for telemetry forwarding.
+
+### To deploy remote monitoring
+
+1. Run the Bun service in `server` mode on a remote machine.
+2. Ensure server SQLite database is writable.
+3. Expose ingest endpoint for kiosk forwarding.
+4. Expose mobile-first dashboard endpoint over HTTPS.
+5. Configure push provider credentials and alert routing.
 
 ### Known limitations
 - The current weather data is **simulated** — production needs a Météo-France fetch with caching.
 - The heatmap is computed in the browser from `speedHistory`. For very long races (24 h), consider downsampling on the server.
-- No persistence: a page refresh resets visible state until the next telemetry frame arrives. The server should always replay the latest snapshot on WebSocket connect.
-- Designed for 1920×1080 TVs. Other resolutions will letterbox via the wrapper transform.
+- Alert thresholds, retry policies, and push provider integration still need final tuning for race conditions.
+- The kiosk dashboard is designed for 1920×1080 TVs; the remote dashboard is mobile-first.
 
 ---
 
@@ -318,4 +410,4 @@ Perso - 24h stan/
 - Weather source (production): Météo-France public forecast API
 - F1 broadcast aesthetic: drawn from public coverage conventions (yellow/purple/green sector coloring, dense panel chrome)
 
-CESI École d'Ingénieurs · Team Nancy · Car #42 · 24h de Stan 2026
+CESI École d'Ingénieurs · 24h de Stan 2026
