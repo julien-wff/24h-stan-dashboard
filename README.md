@@ -39,10 +39,9 @@ The app is designed to run in one of two modes at execution time:
 - Runs on the Raspberry Pi at the stand.
 - Reads incoming telemetry from the receiver ESP32 over USB serial.
 - Validates and parses LoRa frames.
-- Computes `RaceStats`.
-- Persists raw + normalized telemetry to a **local SQLite database** on the Pi.
-- Serves the TV dashboard locally over HTTP/WebSocket.
-- Forwards telemetry snapshots/events to the remote `server` mode.
+- Transforms validated telemetry into race metrics in **local SQLite** (decoded samples, laps with per-sector splits, pit events, alerts).
+- Serves the TV dashboard over a local WebSocket, pushing typed events as they happen.
+- Forwards every event to the remote `server` mode over an outbound WebSocket with at-least-once delivery.
 
 2. `server`
 - Runs on a remote machine.
@@ -144,7 +143,7 @@ We split the track at **turn boundaries** (not arbitrary 25/50/75% splits). Name
 
 ## 3. Data model and runtime architecture
 
-The dashboards consume a single `RaceState` object refreshed at ~10 Hz. In production, this state is built in `kiosk` mode from telemetry received over USB serial from the receiver ESP32 on the Raspberry Pi.
+Both dashboards render from a stream of typed events the backend pushes over WebSocket at ~1 Hz. SQLite is the source of truth on both Pi and server; there is no in-memory `RaceState` on the backend — each client assembles its own view-state from the event stream. In production, the source is telemetry received over USB serial from the receiver ESP32 on the Raspberry Pi.
 
 ### Serial JSON contract (receiver → Raspberry Pi)
 
@@ -186,29 +185,52 @@ The following are **derived server-side** from the raw fields above:
 
 All higher-level statistics shown on both dashboards (lap times, sector splits, average speed, distance, calorie estimate, heatmap, etc.) are **computed from this serial input** by the Bun backend.
 
-### `RaceStats` — backend → frontend
+### Wire protocol: events over WebSocket
 
-`RaceStats` is the object that the **Bun backend** builds from each incoming serial JSON packet (after validation, lap-detection, etc.) and pushes to frontends via **WebSocket**.
+The backend is two stages working off the same SQLite DB:
 
-- In `kiosk` mode, `RaceStats` is sent to the stand TV dashboard and forwarded upstream.
-- In `server` mode, forwarded `RaceStats` is ingested, stored, and rebroadcast to the mobile-first dashboard.
+1. **Persistence** — each validated packet is transformed and written to SQLite (`decoded_samples`, `laps` with per-sector columns, `pit_events`, `alerts`). The DB is the only source of truth; nothing is recomputed elsewhere.
+2. **Push** — an internal event handler runs alongside the writer. When a write produces a fact a subscriber should know about, it emits a typed event over WebSocket.
 
-Every field rendered in either UI is derived from the serial JSON input above; nothing is sent to the browser that hasn't been computed server-side first.
+Three endpoints, one event vocabulary. The Pi is not exposed to the internet — it serves the TV on the LAN and connects out to the server.
+
+| Endpoint | Host | Direction | Stream |
+|---|---|---|---|
+| `ws://pi.local/events` | Pi | TV → Pi (inbound) | Presentational events |
+| `wss://server/ingest` | Server | Pi → Server (outbound) | Full firehose incl. `sample` events |
+| `wss://server/events` | Server | Phone → Server (inbound) | Presentational events |
+
+Public ingest endpoint sits behind robust auth (TBD).
+
+```ts
+type RaceUpdate =
+  | { type: 'tick';    seq; lat; lon; heading; speed; s; sector; currentLapTime; elapsed; updatedAt }  // ~1 Hz
+  | { type: 'lap';     seq; lap; timeSec; splits: [number, number, number, number] }
+  | { type: 'pit';     seq; kind: 'in' | 'out'; at }
+  | { type: 'health';  seq; battery; signal; satellites; at }                                          // ~1 Hz
+  | { type: 'weather'; seq; weather }                                                                  // ~hourly
+  | { type: 'alert';   seq; category; at }
+  | { type: 'sample';  seq; /* raw decoded_samples row */ };                                           // /ingest only
+```
+
+On connect, the host replays a curated set of events (existing laps, latest tick/health/weather, recent pit and alert events) so a fresh client catches up using the same reducer it uses for live events — there is no separate "snapshot" type.
+
+Pi → Server uses at-least-once delivery: every event carries a Pi-local monotonic `seq` persisted in a `forwarding_log` outbox. The Pi retransmits until the server ACKs, and resumes from `lastAckedSeq` on reconnect. Records like "best lap" and "best sector" are derived on read via SQL `MIN()`, never stored as flags.
 
 ### Persistence model (SQLite on both modes)
 
 Both modes persist telemetry to SQLite, for resilience and post-race analysis:
 
 - `kiosk` DB (edge copy on Raspberry Pi)
-  - Raw serial JSON packets (for forensics/replay)
-  - Decoded telemetry samples
-  - Computed race snapshots (`RaceStats`)
-  - Forwarding queue / delivery status to server
+  - `raw_packets` — forensic, Pi-only
+  - `decoded_samples` — one row per validated packet
+  - `laps` — `{ lap, started_at, ended_at, time_sec, sector1_sec, …, sector4_sec }`; best lap and best sector derived on read via `MIN()`
+  - `pit_events`, `alerts`
+  - `forwarding_log` — outbox tracking `seq` ACK status for the Pi → Server link
 
 - `server` DB (central copy)
-  - Ingested telemetry snapshots by source kiosk
-  - Alert events and notification status
-  - Optional long-term aggregates (laps, sectors, incidents)
+  - Strict mirror of the Pi DB minus `raw_packets` and `forwarding_log` — every event the Pi pushes is replayed into the same tables, so race history survives kiosk loss
+  - Notification status alongside `alerts`
 
 This gives local survivability at the stand even if 4G drops, while preserving a central history for remote monitoring.
 
@@ -222,47 +244,54 @@ The server evaluates chain health from forwarded telemetry metadata and emits no
 - `lora_link_problem`: packet loss spikes, long radio silence, receiver-side decode errors.
 - `kiosk_link_problem`: kiosk heartbeat missing, forwarding backlog growing, server ingest timeout.
 
-### `RaceState` shape
+### `RaceState` shape (client view-state)
+
+Reference shape for what a dashboard client typically holds in memory. **Not persisted, not transmitted as a single payload** — clients build it by folding the `RaceUpdate` stream above, and may slice it across multiple stores in practice.
 
 ```ts
 type RaceState = {
   // ─── Time ────────────────────────────────
-  elapsed: number;             // seconds since race start
-  currentLapTime: number;      // seconds in current lap
+  elapsed: number;             // seconds since race start (Saturday 16:00 fixed)
+  currentLapTime: number;
+  updatedAt: number;           // unix ms of the last tick
+
+  // ─── Position / heading ──────────────────
+  lat: number;                 // raw GPS, drives the map car-pin
+  lon: number;
+  heading: number;             // 0–360°, drives car-pin orientation
 
   // ─── Lap / progress ──────────────────────
-  lap: number;                 // current lap number
-  s: number;                   // 0..1 progress around the track
-  sector: 0 | 1 | 2 | 3;       // current sector index
-  lapTimes: number[];          // completed lap times (seconds)
-  bestLap: number;             // seconds
-  ghostDelta: number;          // delta vs best lap, seconds (+/-)
-  sectorTimes: [number[], number[], number[], number[]];
+  lap: number;
+  s: number;                   // 0..1 progress around the track centerline
+  sector: 0 | 1 | 2 | 3;
+  recentLaps: Lap[];           // last ~8 for the panel; full history stays in SQL
+  bestLap: Lap | null;         // running best, folded from `lap` events
+  ghostDelta: number;          // delta vs bestLap at same s, seconds (+/-)
+  sectors: [Sector, Sector, Sector, Sector];
 
   // ─── Speed ───────────────────────────────
   speed: number;               // km/h, current
   avgSpeed: number;            // km/h, race average
   topSpeed: number;            // km/h, race top
-  speedHistory: { t: number, v: number }[]; // last ~240s, 1 Hz
-
-  // ─── Position / heading ──────────────────
-  // (computed downstream from `s` via buildTrack().pointAt(s))
+  speedHistory: { t: number, v: number }[]; // rolling ~240s, 1 Hz
 
   // ─── Heatmap ─────────────────────────────
-  heatmap: number[];           // 120 buckets around the track,
-                               //  exponentially-smoothed avg speed
+  heatmap: number[];           // length 120, indexed by floor(s * 120),
+                               //  exponentially-smoothed avg km/h
 
   // ─── Pit / energy ────────────────────────
   pitStops: number;
   pitDuration: number;         // total seconds in pit
   distanceKm: number;
-  calories: number;            // kcal burned, summed for 2 pedalers
-                               //  at ~7 kcal/min each (moderate effort)
+  calories: number;            // kcal, summed for 2 pedalers at ~7 kcal/min
 
   // ─── Sensor health ───────────────────────
   battery: number;             // 0..1 — drains over ~22h
-  signal: number;              // 0..1 — RF link quality
-  satellites: number;          // count of GNSS sats in solution
+  signal: number;              // 0..1 — from rssi + snr + loss rate
+  satellites: number;          // GNSS sats in solution
+
+  // ─── Recent activity ─────────────────────
+  recentEvents: RaceEvent[];   // ring buffer (~10 latest) feeding the events panel
 
   // ─── Weather ─────────────────────────────
   weather: {
@@ -270,6 +299,19 @@ type RaceState = {
     next: [Hour, Hour, Hour];                    // +1h, +2h, +3h
   };
 };
+
+type Lap = { lap: number; timeSec: number; splits: [number, number, number, number] };
+
+type Sector = {
+  index: 0 | 1 | 2 | 3;        // S1..S4
+  last: number | null;
+  best: number | null;         // purple highlight per F1 convention
+};
+
+type RaceEvent =
+  | { kind: 'lap'; lap: number; timeSec: number; at: number }
+  | { kind: 'pit_in' | 'pit_out'; at: number }
+  | { kind: 'alert'; category: AlertCategory; at: number };
 
 type WxCode = 'sun' | 'partly' | 'cloudy' | 'shower' | 'rain';
 ```
@@ -309,7 +351,7 @@ flowchart LR
   F -- alerts --> I
 ```
 
-In `kiosk` mode, the **Bun backend** on the Pi reads newline-delimited JSON from the receiver ESP32 over USB serial, builds a fresh `RaceStats` object roughly every ~100 ms, stores it in SQLite, serves it locally to the TV dashboard, and forwards snapshots to `server` mode.
+In `kiosk` mode, the **Bun backend** on the Pi reads newline-delimited JSON from the receiver ESP32 over USB serial at ~1 Hz, transforms it into race metrics in SQLite, emits the corresponding typed events to subscribed TV clients, and forwards every event to the remote `server` mode.
 
 In `server` mode, the backend accepts forwarded telemetry, stores a second copy in SQLite, serves a mobile-first dashboard, and emits push notifications for operational issues.
 

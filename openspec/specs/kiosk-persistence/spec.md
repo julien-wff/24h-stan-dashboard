@@ -55,7 +55,7 @@ The kiosk schema SHALL define exactly two tables in `src/backend/kiosk/db/schema
 
 The schema SHALL declare indexes on `decoded_samples(seq)` and `decoded_samples(t)`.
 
-No additional tables (e.g. `race_stats`, `forwarding_queue`) are created by this change. The schema MUST be importable by both the runtime client factory and `drizzle-kit` without side effects (no top-level DB opens, no env reads at module load).
+No additional tables (e.g. `laps`, `pit_events`, `alerts`, `forwarding_log`) are created by this change. The schema MUST be importable by both the runtime client factory and `drizzle-kit` without side effects (no top-level DB opens, no env reads at module load).
 
 #### Scenario: Schema exports both tables
 - **WHEN** another module imports `rawPackets` and `decodedSamples` from `src/backend/kiosk/db/schema.ts`
