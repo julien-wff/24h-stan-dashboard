@@ -19,6 +19,15 @@ Default to using Bun instead of Node.js.
 - Prefer `Bun.file` over `node:fs`'s readFile/writeFile
 - Bun.$`ls` instead of execa.
 
+## After each change
+
+After every completed change (a task, a bugfix, a feature increment), run all three before reporting the work as done:
+
+1. `bun test` — tests must pass.
+2. `bun run check` — Biome formatter + linter + import-sort with safe fixes (or `bun run format` + `bun run lint` if you need them separately).
+
+If any of them fails, fix the underlying issue (do not suppress with `biome-ignore` comments) and re-run until clean.
+
 ## Testing
 
 Use `bun test` to run tests.
