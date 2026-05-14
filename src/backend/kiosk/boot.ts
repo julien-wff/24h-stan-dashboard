@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { createKioskDb } from "./db/client";
 import { runIngest } from "./ingest";
+import { loadResumeState } from "./telemetry/resume-state";
 import { resolveTelemetrySource } from "./telemetry/source";
 
 const dim = Bun.color("#888888", "ansi");
@@ -24,7 +25,15 @@ export async function bootKiosk() {
   });
 
   const db = createKioskDb(dbPath);
-  const source = resolveTelemetrySource(sourceName);
+
+  const resume = await loadResumeState();
+  if (resume) {
+    console.log(kv("resume state", `kind=${resume.kind}`));
+  } else {
+    console.log(kv("resume state", "none (starting from zero)"));
+  }
+
+  const source = resolveTelemetrySource(sourceName, { resume });
 
   const ingestPromise = runIngest({ source, db });
   console.log(kv("ingest", "started"));

@@ -1,37 +1,78 @@
+import type { TrackPolyline } from "./gpx";
+import { bearingDegrees, parseGpx, pointAtDistance } from "./gpx";
+import type { SimulatorState } from "./resume-state";
+import { saveResumeState } from "./resume-state";
 import type { TelemetrySource } from "./source";
 
-// Place de la Carrière, Nancy, France
-const CENTER_LAT = 48.6951;
-const CENTER_LON = 6.1819;
-const LAT_RADIUS = 0.0003;
-const LON_RADIUS = 0.0005;
+const CRUISE_SPEED_KMH = 15;
 
 export class SimulatorSource implements TelemetrySource {
   private stopped = false;
   private stopResolve: (() => void) | undefined;
-  private seq = 0;
+  private polyline: TrackPolyline | undefined;
 
-  constructor(private readonly intervalMs: number = 1000) {}
+  private seq: number;
+  private distanceM: number;
+  private elapsedSec: number;
+
+  constructor(
+    private readonly trackPath: string,
+    private readonly intervalMs: number = 1000,
+    resume?: SimulatorState,
+  ) {
+    if (resume?.trackPath === trackPath) {
+      this.distanceM = resume.distanceM;
+      this.elapsedSec = resume.elapsedSec;
+      this.seq = (resume.seq + 1) % 65536;
+    } else {
+      this.distanceM = 0;
+      this.elapsedSec = 0;
+      this.seq = 0;
+    }
+  }
+
+  private async getPolyline(): Promise<TrackPolyline> {
+    if (!this.polyline) {
+      this.polyline = await parseGpx(this.trackPath);
+    }
+    return this.polyline;
+  }
 
   async *lines(): AsyncIterable<string> {
-    const startEpoch = Math.floor(Date.now() / 1000);
-    let step = 0;
+    const polyline = await this.getPolyline();
+    const startEpochSeconds = Math.floor(Date.now() / 1000);
+
+    let prevLatLon: { lat: number; lon: number } | undefined;
 
     while (!this.stopped) {
-      const angle = (2 * Math.PI * step) / 120;
-      const lat = CENTER_LAT + LAT_RADIUS * Math.sin(angle);
-      const lon = CENTER_LON + LON_RADIUS * Math.cos(angle);
-      const speed = 25 + 5 * Math.sin(angle * 3);
-      const heading = (((step * 3) % 360) + 360) % 360;
+      const speedKmh = CRUISE_SPEED_KMH + 1.0 * Math.sin(this.elapsedSec / 4);
+      const speedMps = speedKmh / 3.6;
 
-      yield JSON.stringify({
+      this.distanceM += speedMps * (this.intervalMs / 1000);
+      this.elapsedSec += this.intervalMs / 1000;
+
+      const pos = pointAtDistance(polyline, this.distanceM);
+
+      let heading: number;
+      if (prevLatLon) {
+        heading = bearingDegrees(prevLatLon, pos);
+      } else {
+        const nextIndex = Math.min(pos.segmentIndex + 1, polyline.points.length - 1);
+        const segStart = polyline.points[pos.segmentIndex];
+        const segEnd = polyline.points[nextIndex];
+        heading = segStart && segEnd ? bearingDegrees(segStart, segEnd) : 0;
+      }
+
+      prevLatLon = { lat: pos.lat, lon: pos.lon };
+
+      const line = JSON.stringify({
         seq: this.seq,
-        t: startEpoch + step,
-        lat,
-        lon,
-        speed,
+        t: startEpochSeconds + Math.floor(this.elapsedSec),
+        lat: pos.lat,
+        lon: pos.lon,
+        speed: speedKmh,
         heading,
-        hdop: 1.2 + 0.1 * Math.sin(angle),
+        hdop: 1.2,
         sats: 9,
         bat: 85,
         cad: 90,
@@ -42,8 +83,17 @@ export class SimulatorSource implements TelemetrySource {
         snr: 10.5,
       });
 
+      yield line;
+
+      await saveResumeState({
+        kind: "simulator",
+        trackPath: this.trackPath,
+        distanceM: this.distanceM,
+        elapsedSec: this.elapsedSec,
+        seq: this.seq,
+      });
+
       this.seq = (this.seq + 1) % 65536;
-      step++;
 
       if (this.intervalMs > 0) {
         await new Promise<void>((resolve) => {

@@ -1,4 +1,4 @@
-import { validateTelemetryPacket } from "../../shared/telemetry/packet";
+import { validateTelemetryPacket } from "@shared/telemetry/packet";
 import type { KioskDb } from "./db/client";
 import { decodedSamples, rawPackets } from "./db/schema";
 import type { TelemetrySource } from "./telemetry/source";
