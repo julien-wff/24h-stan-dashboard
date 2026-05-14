@@ -325,12 +325,21 @@ In `server` mode, the backend accepts forwarded telemetry, stores a second copy 
 ```
 24h-stan-dashboard/
 ├── src/
-│   ├── index.ts                ← Bun entrypoint. Hosts HTTP routes and mode wiring.
-│   ├── index.html              ← Frontend shell.
-│   ├── frontend.tsx            ← React bootstrap.
-│   ├── App.tsx                 ← Dashboard app root.
-│   └── index.css               ← Styles (Tailwind import).
+│   ├── backend/
+│   │   ├── index.ts            ← Bun entrypoint. Hosts HTTP routes and mode wiring.
+│   │   ├── kiosk/              ← (reserved) serial ingest, edge SQLite, forwarder.
+│   │   └── server/             ← (reserved) ingest API, central SQLite, alert engine.
+│   ├── frontend/
+│   │   ├── index.html          ← Frontend shell.
+│   │   ├── frontend.tsx        ← React bootstrap.
+│   │   ├── App.tsx             ← Dashboard app root.
+│   │   ├── index.css           ← Styles (Tailwind + @theme tokens + local fonts).
+│   │   ├── kiosk/              ← (reserved) 1920×1080 stand TV dashboard.
+│   │   └── remote/             ← (reserved) mobile-first spectator dashboard.
+│   └── shared/
+│       └── index.ts            ← Cross-cut types and constants barrel.
 ├── build.ts                    ← Build script.
+├── biome.json                  ← Formatter and linter config.
 ├── package.json                ← Bun scripts and dependencies.
 └── README.md                   ← Project architecture and runtime docs.
 ```
@@ -416,7 +425,7 @@ Expected behavior:
 
 - Design + implementation: this project
 - Track shape source: satellite imagery of Place de la Carrière, Nancy
-- Fonts: [Titillium Web](https://fonts.google.com/specimen/Titillium+Web), [JetBrains Mono](https://www.jetbrains.com/lp/mono/) — both open-source, loaded via Google Fonts
+- Fonts: [Titillium Web](https://fonts.google.com/specimen/Titillium+Web), [JetBrains Mono](https://www.jetbrains.com/lp/mono/) — both open-source, bundled locally via `@fontsource/*`
 - Weather source (production): Météo-France public forecast API
 - F1 broadcast aesthetic: drawn from public coverage conventions (yellow/purple/green sector coloring, dense panel chrome)
 

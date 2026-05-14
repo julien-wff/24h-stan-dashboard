@@ -1,0 +1,27 @@
+@import "tailwindcss";
+@import "@fontsource/titillium-web/700.css";
+@import "@fontsource/titillium-web/900.css";
+@import "@fontsource/jetbrains-mono/600.css";
+@import "@fontsource/jetbrains-mono/800.css";
+
+@theme {
+  --color-bg: #0a0a0a;
+  --color-panel: #13130f;
+  --color-border: rgb(255 255 255 / 0.09);
+  --color-yellow: #fbe216;
+  --color-text: #ffffff;
+  --color-text-dim: rgb(255 255 255 / 0.7);
+  --color-text-dimmer: rgb(255 255 255 / 0.45);
+  --color-green: #00d97e;
+  --color-amber: #ffb000;
+  --color-red: #ff3b3b;
+  --color-purple: #bf5af2;
+  --color-ground: #1c1d1a;
+  --color-building: #332e26;
+  --color-park: #252e20;
+  --color-road: #3d3a35;
+  --color-track-area: #88795c;
+
+  --font-display: "Titillium Web", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
