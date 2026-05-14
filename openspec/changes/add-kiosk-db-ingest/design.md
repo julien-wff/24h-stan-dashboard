@@ -16,7 +16,7 @@ Constraints:
 **Goals:**
 - Establish Drizzle ORM (with `bun:sqlite`) as the only DB access path in the codebase.
 - Define the two foundational kiosk tables (`raw_packets`, `decoded_samples`) and freeze their shape for the upcoming WS and forwarding work.
-- Make schema setup a startup concern: a fresh checkout running `APP_MODE=kiosk KIOSK_TELEMETRY_SOURCE=simulated bun run dev` works with zero manual DB steps.
+- Make schema setup an explicit, one-shot operator step (`bun run db:push`) that is idempotent and decoupled from the kiosk runtime — boot does not migrate.
 - Ship a deterministic simulator and a static fixture so tests don't depend on timing or wall-clock state.
 - Define and lock the `TelemetrySource` interface that the future serial implementation will satisfy.
 - Expose an `onSample` hook on the ingest loop so the next two changes plug in without touching `ingest.ts`.
@@ -90,16 +90,21 @@ Default to `./data/kiosk.db` relative to the process CWD. The kiosk boot path re
 
 **Why not default to `:memory:`?** Silent data loss is worse than a missing directory. A file default makes "where did my packets go?" trivially answerable.
 
-### Schema push on startup via `drizzle-kit push`
+### Schema is applied manually via `bun run db:push`
 
-The kiosk boot path shells out to `bunx drizzle-kit push --config=drizzle.config.ts` before opening the long-lived Drizzle client. The config reads `KIOSK_DB_PATH` from the environment so the same command targets the right DB in dev, CI, and on the Pi.
+Schema setup is an operator action, not a startup action. The `db:push` npm script runs `bunx drizzle-kit push --config drizzle.config.ts` against the configured `KIOSK_DB_PATH`. The kiosk boot path does NOT invoke this; it opens the Drizzle client and immediately starts the ingest loop. If the tables don't exist, the first transactional insert will throw and the kiosk crashes loudly — that's the desired feedback.
 
-If the push exits non-zero, kiosk boot aborts with that exit code; the HTTP server does not start. If it succeeds, the boot path proceeds to open the Drizzle client and start the ingest loop.
+For tests, a `pushSchema(dbPath: string)` helper in `src/backend/kiosk/db/push.ts` invokes the same `drizzle-kit push` command against a temp DB path. It is used only by tests and any future ad-hoc tooling; it is NOT imported by `boot.ts`.
+
+**Why not push on startup?**
+- Hidden side effects at boot are surprising on a race-day machine. The operator should know exactly when the DB schema changes.
+- The startup-push approach couples `bun run dev` and the kiosk runtime to the availability of `drizzle-kit` and its peer driver (`@libsql/client`) at every boot. Failing fast and obviously when those aren't installed is better than a probabilistic boot failure.
+- Race-day operations are easier to reason about when "applying the schema" is a discrete, explicit action with its own log line, not a hidden prelude to ingest.
 
 **Alternatives considered:**
 - **`CREATE TABLE IF NOT EXISTS` on boot** — chosen against. Quick, but it can't detect or reconcile schema drift between the running app and an older DB file, which is exactly the kind of subtle race-day footgun we don't want.
-- **Committed migration files + `migrate()`** — chosen against, for now. Migrations are the right answer once we have a deployed product DB to evolve carefully. For a single-event race DB that gets recreated freely, the ceremony has no payoff. Easy to swap in later: `drizzle-kit push` is non-destructive to existing data on additive changes, and the migration files would replace this codepath, not stack on top of it.
-- **`drizzle-kit` as a runtime dep instead of dev dep** — chosen. Spawning it programmatically at startup means the Pi must have it available. We accept the slightly larger install footprint to keep boot-time schema setup trivial.
+- **Committed migration files + `migrate()`** — chosen against, for now. Migrations are the right answer once we have a deployed product DB to evolve carefully. For a single-event race DB that gets recreated freely, the ceremony has no payoff.
+- **Automatic push on startup** — initially considered, dropped. See "Why not push on startup" above.
 
 ### `TelemetrySource` interface and resolver
 
@@ -160,19 +165,19 @@ async function runIngest(opts: {
 
 Per line:
 1. Parse JSON; on parse error, increment a `bad_data` counter, log once per N, continue.
-2. Validate against the `TelemetryPacket` shape using a small hand-rolled validator in `src/shared/telemetry/packet.ts` (no Zod dep — the contract is fixed and small).
+2. Validate against the `TelemetryPacket` shape using a Zod schema in `src/shared/telemetry/packet.ts` (the `TelemetryPacket` type is `z.infer<typeof telemetryPacketSchema>`).
 3. In one Drizzle transaction: insert into `raw_packets`, get the rowid, insert into `decoded_samples` with that FK.
 4. Call `onSample(decoded)` if provided. Handler errors are caught and logged so a misbehaving subscriber can't kill the loop.
 
 **Why a transaction per packet?** SQLite + WAL handles single-row transactions trivially at 1 Hz, and it keeps `raw_packets` ↔ `decoded_samples` consistent. If we ever batch (e.g., on the future serial path under load), we wrap a window of packets in one transaction instead — the loop shape doesn't change.
 
-**Why no Zod / Valibot?** The packet shape is 14 typed fields. A hand-rolled validator is ~30 lines, has no dependency surface, and produces actionable error messages keyed on field names. Adding a runtime validator library is reserved for when we have more than one such schema.
+**Why Zod?** The packet shape is small (15 fields, two nullable) but the WS-push and server-forwarding capabilities that come next will need their own runtime contracts (event envelopes, alert payloads), so we standardize on Zod once. The error path uses `safeParse` and surfaces the first issue's `path` + `message` so logs name the offending field.
 
 ### Boot path: `APP_MODE` gating in `src/backend/index.ts`
 
 ```ts
 if (process.env.APP_MODE === "kiosk") {
-  await bootKiosk();   // push schema → open db → start ingest
+  await bootKiosk();   // open db → start ingest (schema must already be pushed)
 }
 // HTTP server starts in all modes; routes unchanged.
 ```
@@ -183,9 +188,9 @@ if (process.env.APP_MODE === "kiosk") {
 
 ## Risks / Trade-offs
 
-- **`drizzle-kit push` requires `bunx`/Node available on the Pi at boot.** → Mitigation: the Pi image already has Bun (it runs the app); `drizzle-kit` ships as a dev dep but is exercised via `bunx`, which resolves from `node_modules`. Document this in the kiosk setup notes; verify in the boot path with a clear error if the binary isn't found.
+- **`drizzle-kit push` requires `bunx` resolution on the Pi (one-time, not at boot).** → Mitigation: the Pi image already has Bun (it runs the app); `drizzle-kit` ships as a dev dep but is exercised via `bunx` for the one-shot `bun run db:push` step. Document this in the kiosk setup notes.
 - **Per-packet transactions over a 24h session produce ~86k row pairs.** → Mitigation: at 1 Hz this is well within SQLite/WAL comfort; WAL checkpointing is automatic at defaults. Revisit only if a 24h dry-run shows write amplification problems. Adding batching later is a one-function change.
-- **Schema drift between a stale DB file and new code.** → Mitigation: `drizzle-kit push` runs every boot, so additive changes apply themselves. Destructive renames will prompt for confirmation, which means kiosk boot would hang — accepted, because at race time we'd nuke the DB anyway. Document a "delete `data/kiosk.db` to reset" rescue path.
+- **Schema drift between a stale DB file and new code.** → Mitigation: the operator re-runs `bun run db:push` after pulling schema changes. For destructive renames, drizzle-kit will prompt interactively — the operator handles that on the spot or deletes `data/kiosk.db` and pushes against a fresh file. Document a "delete `data/kiosk.db` to reset" rescue path.
 - **Simulator drift from the real serial format.** → Mitigation: both the simulator and the fixture must round-trip through the same `TelemetryPacket` validator that the future serial reader will use. If the validator passes simulator output, it must pass real-serial output, and divergence shows up as test failures the day the serial reader lands.
 - **`KIOSK_DB_PATH` pointing at a directory the process can't create.** → Mitigation: the boot path explicit-checks parent-dir creation and fails loudly with the resolved absolute path in the error message.
 - **`onSample` handlers blocking the loop.** → Mitigation: the loop calls handlers synchronously but inside a try/catch; the convention is documented that handlers must be fast and non-throwing, and the next change (WS push) will fan out via a queue, not by blocking the producer.
@@ -195,12 +200,13 @@ if (process.env.APP_MODE === "kiosk") {
 No data migration — the kiosk DB does not exist yet. Deploy order:
 
 1. Land this change. Existing `APP_MODE`-unset runs are unaffected (no new behavior).
-2. On the Pi, set `APP_MODE=kiosk` and `KIOSK_TELEMETRY_SOURCE=simulated`. First boot creates `./data/kiosk.db` via push and starts ingest.
-3. To reset: delete `./data/kiosk.db` and restart. Next boot recreates it.
+2. On the Pi, run `bun run db:push` once to create `./data/kiosk.db` with the schema.
+3. Set `APP_MODE=kiosk` and `KIOSK_TELEMETRY_SOURCE=simulated`. Boot opens the existing DB and starts ingest.
+4. After schema changes: re-run `bun run db:push`, then restart the kiosk.
+5. To reset: delete `./data/kiosk.db`, run `bun run db:push` again, then restart.
 
 Rollback: revert the change. The `data/` directory remains on disk but is harmless (gitignored, not referenced by older code).
 
 ## Open Questions
 
-- **`drizzle-kit push` interactive prompts.** `drizzle-kit push` can ask for confirmation on destructive changes. For automated boot, we'll need to pass a `--force`-equivalent or wrap stdin. To be resolved during implementation by reading the `drizzle-kit` flags; if it can't be made non-interactive, fall back to writing the DDL inline as a transitional step.
 - **Should the resolver accept a file path for the fixture in dev?** Probably yes (e.g., `KIOSK_TELEMETRY_SOURCE=./fixtures/foo.ndjson`), but not needed for the simulator path to work. Deferring to a follow-up unless it falls out of the implementation naturally.

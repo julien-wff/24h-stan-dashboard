@@ -107,27 +107,26 @@ The loop SHALL terminate cleanly when the source's `lines()` iterable completes 
 - **WHEN** an `onSample` handler throws
 - **THEN** the loop logs the error and continues processing subsequent lines, and the just-written rows remain in the DB
 
-### Requirement: Kiosk boot wires push, DB, source, and ingest in order
+### Requirement: Kiosk boot wires DB, source, and ingest in order
 
 When `APP_MODE=kiosk`, the backend entrypoint at `src/backend/index.ts` SHALL invoke a `bootKiosk` function (defined in `src/backend/kiosk/boot.ts`) BEFORE calling `Bun.serve()`. `bootKiosk` SHALL perform these steps in order:
 
 1. Resolve and create (if missing) the parent directory of `KIOSK_DB_PATH`.
-2. Run `drizzle-kit push` against `KIOSK_DB_PATH` and abort on non-zero exit.
-3. Open the Drizzle client against `KIOSK_DB_PATH`.
-4. Resolve the `TelemetrySource` from `KIOSK_TELEMETRY_SOURCE` (default `"simulated"` if unset).
-5. Start `runIngest({ source, db })` (without awaiting completion; the loop runs for the life of the process).
-6. Return; control returns to the entrypoint, which then starts `Bun.serve()`.
+2. Open the Drizzle client against `KIOSK_DB_PATH`. The schema is assumed to have been applied previously via `bun run db:push`; `bootKiosk` MUST NOT invoke `drizzle-kit` or run any DDL.
+3. Resolve the `TelemetrySource` from `KIOSK_TELEMETRY_SOURCE` (default `"simulated"` if unset).
+4. Start `runIngest({ source, db })` (without awaiting completion; the loop runs for the life of the process).
+5. Return; control returns to the entrypoint, which then starts `Bun.serve()`.
 
 When `APP_MODE` is unset, empty, or any value other than `"kiosk"`, `bootKiosk` MUST NOT run; the existing HTTP behavior MUST remain unchanged. The existing routes (`/*`, `/api/hello`, `/api/hello/:name`) MUST continue to be served identically in all modes.
 
 #### Scenario: Kiosk mode boots end-to-end with the simulator
-- **WHEN** the process starts with `APP_MODE=kiosk` and `KIOSK_TELEMETRY_SOURCE=simulated`
-- **THEN** the schema push runs, the DB file is created, the ingest loop begins writing rows, and the HTTP server starts serving `/api/hello`
+- **WHEN** the process starts with `APP_MODE=kiosk` and `KIOSK_TELEMETRY_SOURCE=simulated` against a DB whose schema has been pushed
+- **THEN** the ingest loop begins writing rows and the HTTP server starts serving `/api/hello`
 
 #### Scenario: Non-kiosk modes are unaffected
 - **WHEN** the process starts with `APP_MODE` unset
-- **THEN** no schema push runs, no `data/` directory is created, no ingest loop starts, and the existing HTTP routes serve as before
+- **THEN** no `data/` directory is created, no ingest loop starts, and the existing HTTP routes serve as before
 
-#### Scenario: Push failure prevents HTTP from starting
-- **WHEN** `APP_MODE=kiosk` is set but `drizzle-kit push` exits non-zero
-- **THEN** the process exits non-zero and `Bun.serve()` is never called
+#### Scenario: Boot does not push schema
+- **WHEN** the process starts with `APP_MODE=kiosk`
+- **THEN** no `drizzle-kit` subprocess is spawned by `boot.ts` (the operator is responsible for having run `bun run db:push` beforehand)

@@ -1,6 +1,9 @@
 # dependencies (bun install)
 node_modules
 
+# kiosk SQLite database files
+data/
+
 # output
 out
 dist

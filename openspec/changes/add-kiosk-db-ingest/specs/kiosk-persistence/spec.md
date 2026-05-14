@@ -87,28 +87,26 @@ The variable SHALL be documented in `.env.example` alongside the existing `APP_M
 - **WHEN** a developer reads `.env.example`
 - **THEN** it contains a `KIOSK_DB_PATH` entry with a comment naming the default `./data/kiosk.db`
 
-### Requirement: Schema is pushed to the database at kiosk startup
+### Requirement: Schema is applied manually via `bun run db:push`
 
-When `APP_MODE=kiosk`, the boot path SHALL run `drizzle-kit push` against the configured `KIOSK_DB_PATH` BEFORE opening the long-lived Drizzle client and BEFORE starting any HTTP server or ingest loop.
-
-The push SHALL be invoked programmatically (e.g. `bunx drizzle-kit push --config drizzle.config.ts`) and SHALL be non-interactive. A non-zero exit from the push command MUST abort kiosk boot with the same non-zero exit code; the HTTP server MUST NOT start in that case.
+Schema setup SHALL be an explicit operator action, not a kiosk-startup action. The kiosk runtime MUST NOT invoke `drizzle-kit push` or any schema-applying step at boot.
 
 A repository-level `drizzle.config.ts` SHALL exist that points `drizzle-kit` at `src/backend/kiosk/db/schema.ts` and reads `KIOSK_DB_PATH` from the environment (with the same default as the runtime).
 
-The same `drizzle-kit push` invocation SHALL be exposed as a `package.json` script (`db:push`) so developers can run it manually against a custom `KIOSK_DB_PATH` without booting the server.
+A `db:push` script SHALL be defined in `package.json` that invokes `bunx drizzle-kit push --config drizzle.config.ts`. Running it applies the schema to the DB at `KIOSK_DB_PATH` (default `./data/kiosk.db`).
 
-#### Scenario: Fresh checkout boots cleanly
-- **WHEN** a developer with no existing `data/kiosk.db` runs the kiosk for the first time with `APP_MODE=kiosk KIOSK_TELEMETRY_SOURCE=simulated`
-- **THEN** the push creates the `raw_packets` and `decoded_samples` tables before the ingest loop begins inserting rows
+#### Scenario: `db:push` creates both tables on a fresh DB
+- **WHEN** an operator runs `bun run db:push` with no existing DB file
+- **THEN** `raw_packets` and `decoded_samples` (with their indexes) are created at `KIOSK_DB_PATH`
 
-#### Scenario: Push failure aborts boot
-- **WHEN** `drizzle-kit push` exits non-zero (e.g. config file missing)
-- **THEN** the kiosk process exits non-zero and `Bun.serve()` is not called
+#### Scenario: Re-running `db:push` is a no-op for unchanged schema
+- **WHEN** an operator runs `bun run db:push` a second time against an existing DB with the same schema
+- **THEN** the command completes without errors and without dropping or recreating tables; pre-existing rows remain
 
-#### Scenario: Re-boot against an existing DB is a no-op
-- **WHEN** the kiosk boots a second time against an unchanged schema and existing DB file
-- **THEN** the push completes without errors and without dropping or recreating tables; pre-existing rows remain
+#### Scenario: `db:push` honors `KIOSK_DB_PATH`
+- **WHEN** an operator runs `KIOSK_DB_PATH=/tmp/x.db bun run db:push`
+- **THEN** `/tmp/x.db` ends up with the schema (and `./data/kiosk.db` is not touched)
 
-#### Scenario: Manual `bun run db:push` matches the boot invocation
-- **WHEN** a developer runs `bun run db:push` with `KIOSK_DB_PATH=/tmp/x.db`
-- **THEN** `/tmp/x.db` ends up with the same schema the kiosk boot path would produce
+#### Scenario: Kiosk boot does not invoke schema push
+- **WHEN** the process starts with `APP_MODE=kiosk`
+- **THEN** `boot.ts` does NOT shell out to `drizzle-kit`; it opens the Drizzle client and starts ingest directly

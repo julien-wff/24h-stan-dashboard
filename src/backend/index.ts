@@ -1,5 +1,20 @@
 import { serve } from "bun";
 import index from "../frontend/index.html";
+import { bootKiosk } from "./kiosk/boot";
+
+const dim = Bun.color("#888888", "ansi");
+const accent = Bun.color("#22d3ee", "ansi");
+const value = Bun.color("#a3e635", "ansi");
+const reset = "\x1b[0m";
+
+const kv = (label: string, v: string) => `  ${dim}${label.padEnd(22)}${reset} ${value}${v}${reset}`;
+
+console.log(`${accent}── Backend ${"─".repeat(40)}${reset}`);
+console.log(kv("APP_MODE", process.env.APP_MODE ?? "(unset → server)"));
+
+if (process.env.APP_MODE === "kiosk") {
+  await bootKiosk();
+}
 
 const server = serve({
   routes: {
@@ -38,4 +53,5 @@ const server = serve({
   },
 });
 
-console.log(`🚀 Server running at ${server.url}`);
+console.log(kv("HTTP", server.url.toString()));
+console.log(`${accent}${"─".repeat(50)}${reset}`);
