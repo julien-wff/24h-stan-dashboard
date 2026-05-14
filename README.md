@@ -378,6 +378,11 @@ At execution time, the app should run with a mode selector (recommended environm
 - `APP_MODE=kiosk`
 - `APP_MODE=server`
 
+For `kiosk` mode, telemetry input is selected with a single env var (recommended: `KIOSK_TELEMETRY_SOURCE`):
+
+- `KIOSK_TELEMETRY_SOURCE=/dev/ttyUSB0` (or any serial device path): read newline-delimited JSON from the receiver ESP32 over serial.
+- `KIOSK_TELEMETRY_SOURCE=simulated`: use simulated telemetry instead of reading serial data.
+
 Expected behavior:
 
 - `kiosk`: serial ingest + local SQLite + TV dashboard + forward upstream.
