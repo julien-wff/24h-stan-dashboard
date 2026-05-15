@@ -108,7 +108,7 @@ The stats widget is allowed to consume fields not currently in `RaceState` (`dis
 
 ### Requirement: Sector widget renders four sector rows with active indicator
 
-A widget with `id: "sector"` SHALL be registered. Its component SHALL render, inside the standard panel chrome titled `SECTORS`, exactly four rows in order, one per sector index `0..3`. The sector names SHALL be, in order: `S1 · NORTH STRAIGHT`, `S2 · EAST TURN`, `S3 · SOUTH STRAIGHT`, `S4 · WEST TURN`.
+A widget with `id: "sector"` SHALL be registered. Its component SHALL render, inside the standard panel chrome titled `SECTORS`, exactly four rows in order, one per sector index `0..3`. The sector names SHALL be, in order: `S1 · LIGNE DROITE EST`, `S2 · VIRAGE NORD`, `S3 · LIGNE DROITE OUEST`, `S4 · VIRAGE SUD`.
 
 Each row SHALL display:
 
@@ -120,7 +120,7 @@ The widget SHALL read `state.sector` and `state.sectors` from `useRaceState()`. 
 
 #### Scenario: Sector widget renders four rows with the documented names
 - **WHEN** the sector widget is rendered against any `RaceState`
-- **THEN** the rendered output contains, in order, the strings `S1 · NORTH STRAIGHT`, `S2 · EAST TURN`, `S3 · SOUTH STRAIGHT`, `S4 · WEST TURN`
+- **THEN** the rendered output contains, in order, the strings `S1 · LIGNE DROITE EST`, `S2 · VIRAGE NORD`, `S3 · LIGNE DROITE OUEST`, `S4 · VIRAGE SUD`
 
 #### Scenario: Active sector row is highlighted
 - **WHEN** the sector widget is rendered against a state with `sector: 2`
