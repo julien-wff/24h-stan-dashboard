@@ -6,6 +6,18 @@ export type LapEvent = {
   endedAt: number;
 };
 
+export type TickEvent = {
+  t: number;
+  elapsed: number;
+  lat: number;
+  lon: number;
+  heading: number;
+  speed: number;
+  s: number;
+  sector: 0 | 1 | 2 | 3;
+};
+
 export type RaceEventMap = {
   lap: LapEvent;
+  tick: TickEvent;
 };

@@ -1,6 +1,8 @@
 import { serve } from "bun";
 import index from "../frontend/index.html";
 import { bootKiosk } from "./kiosk/boot";
+import { bridgeBusToServer } from "./kiosk/ws/bridge";
+import { createKioskWsHandler } from "./kiosk/ws/handler";
 
 const dim = Bun.color("#888888", "ansi");
 const accent = Bun.color("#22d3ee", "ansi");
@@ -12,46 +14,42 @@ const kv = (label: string, v: string) => `  ${dim}${label.padEnd(22)}${reset} ${
 console.log(`${accent}── Backend ${"─".repeat(40)}${reset}`);
 console.log(kv("APP_MODE", process.env.APP_MODE ?? "(unset → server)"));
 
+let kioskHandle: Awaited<ReturnType<typeof bootKiosk>> | undefined;
+
 if (process.env.APP_MODE === "kiosk") {
-  await bootKiosk();
+  kioskHandle = await bootKiosk();
 }
 
-const server = serve({
-  routes: {
-    // Serve index.html for all unmatched routes.
-    "/*": index,
+const development = process.env.NODE_ENV !== "production" && {
+  hmr: true,
+  console: true,
+};
 
-    "/api/hello": {
-      async GET(_req) {
-        return Response.json({
-          message: "Hello, world!",
-          method: "GET",
-        });
+const server = kioskHandle
+  ? serve({
+      routes: {
+        "/events": (req, server) => {
+          if (server.upgrade(req, { data: { connectedAt: Date.now() } })) return undefined;
+          return new Response("WebSocket upgrade failed", { status: 400 });
+        },
+        "/*": index,
       },
-      async PUT(_req) {
-        return Response.json({
-          message: "Hello, world!",
-          method: "PUT",
-        });
+      websocket: createKioskWsHandler({
+        db: kioskHandle.db,
+        centerline: kioskHandle.centerline,
+      }),
+      development,
+    })
+  : serve({
+      routes: {
+        "/*": index,
       },
-    },
+      development,
+    });
 
-    "/api/hello/:name": async (req) => {
-      const name = req.params.name;
-      return Response.json({
-        message: `Hello, ${name}!`,
-      });
-    },
-  },
-
-  development: process.env.NODE_ENV !== "production" && {
-    // Enable browser hot reloading in development
-    hmr: true,
-
-    // Echo console logs from the browser to the server
-    console: true,
-  },
-});
+if (kioskHandle) {
+  bridgeBusToServer({ bus: kioskHandle.bus, server });
+}
 
 console.log(kv("HTTP", server.url.toString()));
 console.log(`${accent}${"─".repeat(50)}${reset}`);

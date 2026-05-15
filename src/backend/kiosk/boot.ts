@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { createKioskDb } from "./db/client";
 import { TypedEventBus } from "./events/bus";
 import { createLapDetector } from "./events/lap";
+import { createTickEmitter } from "./events/tick";
 import type { RaceEventMap } from "./events/types";
 import { runIngest } from "./ingest";
 import { loadResumeState } from "./telemetry/resume-state";
@@ -47,14 +48,23 @@ export async function bootKiosk() {
   const centerline = loadCenterline(trackPath);
   const bus = new TypedEventBus<RaceEventMap>();
   const lapDetector = createLapDetector({ db, centerline, bus });
+  const tickEmitter = createTickEmitter({ bus, centerline });
   console.log(kv("centerline", `${centerline.totalMeters.toFixed(1)} m`));
 
-  const ingestPromise = runIngest({ source, db, onSample: lapDetector.handleSample });
+  const ingestPromise = runIngest({
+    source,
+    db,
+    onSample: (s) => {
+      tickEmitter.handleSample(s);
+      lapDetector.handleSample(s);
+    },
+  });
   console.log(kv("ingest", "started"));
 
   return {
     db,
     bus,
+    centerline,
     stopIngest: async () => {
       await source.stop();
       await ingestPromise;
