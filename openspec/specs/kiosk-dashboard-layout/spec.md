@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines the v1 kiosk dashboard's concrete layout and widget set: the `defaultLayout` value that wires the topbar plus a three-column content grid, and the individual widget implementations that fill each slot (`topbar`, `speed`, `stats`, `sector`, `lap-progress`, `lap-times`, plus four placeholders for `velocity`, `map`, `weather`, `latest-events`). All widgets in this capability read race state exclusively through `useRaceState()` and style themselves via design-system Tailwind tokens, so the dashboard is a pure projection of `RaceState` onto the grid described by `kiosk-widget-runtime`.
+Defines the v1 kiosk dashboard's concrete layout and widget set: the `defaultLayout` value that wires the topbar plus a three-column content grid, and the individual widget implementations that fill each slot (`topbar`, `speed`, `stats`, `sector`, `lap-progress`, `lap-times`, `map`, plus three placeholders for `velocity`, `weather`, `latest-events`). The `map` slot is filled by the real `MapWidget` from the `kiosk-map-widget` capability. All widgets in this capability read race state exclusively through `useRaceState()` and style themselves via design-system Tailwind tokens, so the dashboard is a pure projection of `RaceState` onto the grid described by `kiosk-widget-runtime`.
 
 ## Requirements
 
@@ -193,35 +193,36 @@ Rows in the list region SHALL be separated by a subtle `border-t border-border` 
 
 ### Requirement: Placeholder widgets occupy the remaining slots
 
-Four widgets SHALL be registered, each produced by the `placeholder(id, title)` factory from `kiosk-widget-runtime`:
+Three widgets SHALL be registered, each produced by the `placeholder(id, title)` factory from `kiosk-widget-runtime`:
 
 - `placeholder("velocity",       "VELOCITY · 240s")`
-- `placeholder("map",            "PLACE DE LA CARRIÈRE · NANCY")`
 - `placeholder("weather",        "WEATHER · NANCY")`
 - `placeholder("latest-events",  "LATEST EVENTS")`
 
 These widgets SHALL render the standard panel chrome with the given title and an empty body region. They SHALL NOT call `useRaceState()`.
 
-#### Scenario: Map placeholder renders its title and no content
-- **WHEN** the `map` widget is rendered
-- **THEN** the rendered output contains the text `PLACE DE LA CARRIÈRE · NANCY` in the panel header, and its body region contains no text content
+The `map` slot is NOT a placeholder; it is filled by the real `MapWidget` defined by the `kiosk-map-widget` capability.
 
 #### Scenario: Placeholder widgets do not subscribe to race state
-- **WHEN** the source files for the four placeholder widget registrations are read
+- **WHEN** the source files for the three placeholder widget registrations are read
 - **THEN** none of them import `useRaceState` from `@frontend/kiosk/state/store`
+
+#### Scenario: Map slot is filled by the real map widget, not a placeholder
+- **WHEN** the widget registry is queried for the widget with id `"map"`
+- **THEN** the returned entry is the `MapWidget` from `kiosk-map-widget`, and its component is not produced by the `placeholder()` factory
 
 ### Requirement: All v1 widgets read race state only via `useRaceState()`
 
-Every real widget (`topbar`, `speed`, `stats`, `sector`, `lap-progress`, `lap-times`) SHALL access race state exclusively through the `useRaceState()` hook from `@frontend/kiosk/state/store`. Widgets SHALL NOT:
+Every real widget (`topbar`, `speed`, `stats`, `sector`, `lap-progress`, `lap-times`, `map`) SHALL access race state exclusively through the `useRaceState()` hook from `@frontend/kiosk/state/store`. Widgets SHALL NOT:
 
 - Import the store internals (`getSnapshot`, `subscribe`, `dispatch`, `setConnection`, `resetState`, the mutable `state` binding) directly.
-- Import or open a WebSocket, fetch, or any other I/O primitive.
+- Import or open a WebSocket, fetch, or any other I/O primitive — **except** the `map` widget, which is permitted exactly one `fetch("/api/track")` call gated behind the debug-overlay flag, as specified by `kiosk-map-widget`.
 - Read from `RaceUpdate` types or any backend type.
 
 #### Scenario: No widget imports store internals
 - **WHEN** a developer greps `src/frontend/kiosk/widgets/` for `from "@frontend/kiosk/state/store"`
 - **THEN** every match imports only the symbol `useRaceState` (and possibly the `RaceState` type), and no widget imports `getSnapshot`, `subscribe`, `dispatch`, `setConnection`, or `resetState`
 
-#### Scenario: No widget performs I/O
+#### Scenario: No widget performs I/O outside the map debug overlay
 - **WHEN** a developer greps `src/frontend/kiosk/widgets/` for `WebSocket`, `fetch(`, or any `ws-client` import
-- **THEN** no matches are found
+- **THEN** the only matches are inside `src/frontend/kiosk/widgets/map/`, and within that directory the only `fetch` call targets `/api/track` under the debug-overlay branch
