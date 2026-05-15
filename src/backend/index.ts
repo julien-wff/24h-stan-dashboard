@@ -28,6 +28,11 @@ const development = process.env.NODE_ENV !== "production" && {
 const server = kioskHandle
   ? serve({
       routes: {
+        "/api/track": () =>
+          Response.json({
+            points: kioskHandle.centerline.points.map((p) => ({ lat: p.lat, lon: p.lon })),
+            totalMeters: kioskHandle.centerline.totalMeters,
+          }),
         "/events": (req, server) => {
           if (server.upgrade(req, { data: { connectedAt: Date.now() } })) return undefined;
           return new Response("WebSocket upgrade failed", { status: 400 });
