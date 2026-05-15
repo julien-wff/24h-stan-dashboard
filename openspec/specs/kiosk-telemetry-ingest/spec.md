@@ -193,15 +193,15 @@ When `APP_MODE=kiosk`, the backend entrypoint at `src/backend/index.ts` SHALL in
 7. Start `runIngest({ source, db, onSample: lapDetector.handleSample })` (without awaiting completion; the loop runs for the life of the process).
 8. Return; control returns to the entrypoint, which then starts `Bun.serve()`.
 
-When `APP_MODE` is unset, empty, or any value other than `"kiosk"`, `bootKiosk` MUST NOT run; the existing HTTP behavior MUST remain unchanged. The existing routes (`/*`, `/api/hello`, `/api/hello/:name`) MUST continue to be served identically in all modes.
+When `APP_MODE` is unset, empty, or any value other than `"kiosk"`, `bootKiosk` MUST NOT run; no kiosk-specific side effects (DB connection, ingest loop, centerline load, event-bus wiring) MUST occur. The catch-all `"/*"` HTML route MUST continue to be served identically in all modes.
 
 #### Scenario: Kiosk mode boots end-to-end with the simulator
 - **WHEN** the process starts with `APP_MODE=kiosk` and `KIOSK_TELEMETRY_SOURCE=simulated` against a DB whose schema has been pushed
-- **THEN** the ingest loop begins writing rows, the lap detector is wired as the `onSample` handler, and the HTTP server starts serving `/api/hello`
+- **THEN** the ingest loop begins writing rows, the lap detector is wired as the `onSample` handler, and the HTTP server starts serving the catch-all `"/*"` HTML route
 
 #### Scenario: Non-kiosk modes are unaffected
 - **WHEN** the process starts with `APP_MODE` unset
-- **THEN** no `data/` directory is created, no ingest loop starts, no centerline is loaded, and the existing HTTP routes serve as before
+- **THEN** no `data/` directory is created, no ingest loop starts, no centerline is loaded, and the catch-all `"/*"` HTML route is served as before
 
 #### Scenario: Boot does not push schema
 - **WHEN** the process starts with `APP_MODE=kiosk`
