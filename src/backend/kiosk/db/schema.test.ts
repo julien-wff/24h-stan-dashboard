@@ -49,6 +49,38 @@ test("creates indexes on decoded_samples(seq) and decoded_samples(t)", () => {
   db.close();
 });
 
+test("pushes laps table to DB with lap as primary key", () => {
+  const db = new Database(dbPath);
+
+  const tables = db
+    .query("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+    .all() as Array<{ name: string }>;
+  expect(tables.map((t) => t.name)).toContain("laps");
+
+  const cols = db.query("PRAGMA table_info(laps)").all() as Array<{
+    name: string;
+    pk: number;
+    notnull: number;
+  }>;
+  const colNames = cols.map((c) => c.name);
+  expect(colNames).toContain("lap");
+  expect(colNames).toContain("started_at");
+  expect(colNames).toContain("ended_at");
+  expect(colNames).toContain("time_sec");
+  expect(colNames).toContain("sector1_sec");
+  expect(colNames).toContain("sector2_sec");
+  expect(colNames).toContain("sector3_sec");
+  expect(colNames).toContain("sector4_sec");
+
+  const lapCol = cols.find((c) => c.name === "lap");
+  expect(lapCol?.pk).toBe(1);
+
+  const isBestCols = cols.filter((c) => c.name.startsWith("is_best"));
+  expect(isBestCols.length).toBe(0);
+
+  db.close();
+});
+
 test("re-running pushSchema against an unchanged DB is a no-op (existing data preserved)", async () => {
   const db = new Database(dbPath);
   db.run("INSERT INTO raw_packets (seq, received_at, payload) VALUES (99, 1000, '{}')");

@@ -1,5 +1,5 @@
-import type { TrackPolyline } from "./gpx";
-import { bearingDegrees, parseGpx, pointAtDistance } from "./gpx";
+import { loadCenterline } from "../track/centerline";
+import { bearingDegrees, pointAtDistance } from "./gpx";
 import type { SimulatorState } from "./resume-state";
 import { saveResumeState } from "./resume-state";
 import type { TelemetrySource } from "./source";
@@ -9,7 +9,6 @@ const CRUISE_SPEED_KMH = 15;
 export class SimulatorSource implements TelemetrySource {
   private stopped = false;
   private stopResolve: (() => void) | undefined;
-  private polyline: TrackPolyline | undefined;
 
   private seq: number;
   private distanceM: number;
@@ -31,15 +30,8 @@ export class SimulatorSource implements TelemetrySource {
     }
   }
 
-  private async getPolyline(): Promise<TrackPolyline> {
-    if (!this.polyline) {
-      this.polyline = await parseGpx(this.trackPath);
-    }
-    return this.polyline;
-  }
-
   async *lines(): AsyncIterable<string> {
-    const polyline = await this.getPolyline();
+    const polyline = loadCenterline(this.trackPath);
     const startEpochSeconds = Math.floor(Date.now() / 1000);
 
     let prevLatLon: { lat: number; lon: number } | undefined;

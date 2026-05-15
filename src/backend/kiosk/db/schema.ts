@@ -1,5 +1,16 @@
 import { index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
+export const laps = sqliteTable("laps", {
+  lap: integer("lap").primaryKey(),
+  startedAt: integer("started_at").notNull(),
+  endedAt: integer("ended_at").notNull(),
+  timeSec: real("time_sec").notNull(),
+  sector1Sec: real("sector1_sec").notNull(),
+  sector2Sec: real("sector2_sec").notNull(),
+  sector3Sec: real("sector3_sec").notNull(),
+  sector4Sec: real("sector4_sec").notNull(),
+});
+
 export const rawPackets = sqliteTable("raw_packets", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   seq: integer("seq").notNull(),
