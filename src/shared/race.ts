@@ -6,7 +6,7 @@ export function getRaceStartUnixSec(): number {
     return new Date(DEFAULT_RACE_START).getTime() / 1000;
   }
   const d = new Date(raw);
-  if (isNaN(d.getTime())) {
+  if (Number.isNaN(d.getTime())) {
     throw new Error(`RACE_START_AT is not a valid timestamp: "${raw}"`);
   }
   return d.getTime() / 1000;

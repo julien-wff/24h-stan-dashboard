@@ -74,7 +74,8 @@ test("tick fields mirror the sample", () => {
   const sample = makeSample({ t: 9999, lat: 47.1, lon: 5.2, heading: 180, speed: 55, fix: 1 });
   emitter.handleSample(sample);
 
-  const tick = ticks[0]!;
+  const tick = ticks[0];
+  if (!tick) throw new Error("expected a tick event");
   expect(tick.t).toBe(9999);
   expect(tick.lat).toBe(47.1);
   expect(tick.lon).toBe(5.2);
@@ -95,5 +96,5 @@ test("elapsed reflects race start", () => {
   const sampleT = raceStart - 3600; // one hour pre-race
   emitter.handleSample(makeSample({ t: sampleT, fix: 1 }));
 
-  expect(ticks[0]!.elapsed).toBeCloseTo(-3600, 5);
+  expect(ticks[0]?.elapsed).toBeCloseTo(-3600, 5);
 });

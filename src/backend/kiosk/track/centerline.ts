@@ -55,8 +55,9 @@ export function loadCenterline(path: string): Centerline {
     let bestSM = 0;
 
     for (let i = 0; i < points.length - 1; i++) {
-      const a = points[i]!;
-      const b = points[i + 1]!;
+      const a = points[i];
+      const b = points[i + 1];
+      if (!a || !b) continue;
 
       const dLat = b.lat - a.lat;
       const dLon = b.lon - a.lon;

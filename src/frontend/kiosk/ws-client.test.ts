@@ -63,7 +63,8 @@ test("valid update is dispatched", async () => {
   const { connect } = await import("./ws-client");
   const dispose = connect();
 
-  const ws = FakeWebSocket.instances[0]!;
+  const ws = FakeWebSocket.instances[0];
+  if (!ws) throw new Error("expected websocket instance");
   ws.triggerOpen();
   ws.triggerMessage(
     JSON.stringify({
@@ -91,7 +92,8 @@ test("invalid update is dropped and does not dispatch", async () => {
   const { connect } = await import("./ws-client");
   const dispose = connect();
 
-  const ws = FakeWebSocket.instances[0]!;
+  const ws = FakeWebSocket.instances[0];
+  if (!ws) throw new Error("expected websocket instance");
   ws.triggerOpen();
   ws.triggerMessage(JSON.stringify({ type: "unknown" }));
 
@@ -110,7 +112,8 @@ test("malformed JSON is dropped", async () => {
   const { connect } = await import("./ws-client");
   const dispose = connect();
 
-  const ws = FakeWebSocket.instances[0]!;
+  const ws = FakeWebSocket.instances[0];
+  if (!ws) throw new Error("expected websocket instance");
   ws.triggerOpen();
   ws.triggerMessage("not json");
 
@@ -132,7 +135,8 @@ test("backoff schedule: 1s, 2s, 4s, 8s on consecutive closes", async () => {
   const { connect } = await import("./ws-client");
   const dispose = connect();
 
-  const ws0 = FakeWebSocket.instances[0]!;
+  const ws0 = FakeWebSocket.instances[0];
+  if (!ws0) throw new Error("expected websocket instance");
   ws0.triggerClose();
   ws0.triggerClose();
   ws0.triggerClose();
@@ -158,7 +162,8 @@ test("backoff caps at 30s after many closes", async () => {
   const { connect } = await import("./ws-client");
   const dispose = connect();
 
-  const ws0 = FakeWebSocket.instances[0]!;
+  const ws0 = FakeWebSocket.instances[0];
+  if (!ws0) throw new Error("expected websocket instance");
   for (let i = 0; i < 10; i++) {
     ws0.triggerClose();
   }
@@ -180,7 +185,8 @@ test("successful open resets backoff", async () => {
   const { connect } = await import("./ws-client");
   const dispose = connect();
 
-  const ws0 = FakeWebSocket.instances[0]!;
+  const ws0 = FakeWebSocket.instances[0];
+  if (!ws0) throw new Error("expected websocket instance");
   ws0.triggerClose();
   ws0.triggerClose();
   ws0.triggerOpen();
@@ -211,7 +217,7 @@ test("disposer cancels pending reconnect", async () => {
   const { connect } = await import("./ws-client");
   const dispose = connect();
 
-  FakeWebSocket.instances[0]!.triggerClose();
+  FakeWebSocket.instances[0]?.triggerClose();
   dispose();
 
   mutableGlobal.clearTimeout = originalClearTimeout;

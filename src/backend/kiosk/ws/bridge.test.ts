@@ -31,7 +31,7 @@ test("tick event publishes to race topic with correct payload", () => {
   bus.emit("tick", tickPayload);
 
   expect(calls).toHaveLength(1);
-  expect(calls[0]!.topic).toBe("race");
+  expect(calls[0]?.topic).toBe("race");
   const msg = JSON.parse(calls[0]!.message);
   expect(msg.type).toBe("tick");
   expect(msg.t).toBe(1000);
@@ -53,7 +53,7 @@ test("lap event publishes to race topic with correct payload", () => {
   bus.emit("lap", lapPayload);
 
   expect(calls).toHaveLength(1);
-  expect(calls[0]!.topic).toBe("race");
+  expect(calls[0]?.topic).toBe("race");
   const msg = JSON.parse(calls[0]!.message);
   expect(msg.type).toBe("lap");
   expect(msg.lap).toBe(3);

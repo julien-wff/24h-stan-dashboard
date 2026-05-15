@@ -42,14 +42,17 @@ export function reduce(state: RaceState, update: RaceUpdate): RaceState {
   const sortedLaps = allLaps.slice().sort((a, b) => a.lap - b.lap);
   const recentLaps = sortedLaps.slice(-8);
 
-  const latestLap = sortedLaps[sortedLaps.length - 1]!;
-  const newSectors: [SectorAgg, SectorAgg, SectorAgg, SectorAgg] = [0, 1, 2, 3].map((i) => {
+  const latestLap = sortedLaps[sortedLaps.length - 1];
+  if (!latestLap) throw new Error("unreachable: laps is non-empty after lap update");
+
+  const sectorIndices = [0, 1, 2, 3] as const;
+  const newSectors = sectorIndices.map((i): SectorAgg => {
     let best: number | null = null;
     for (const lap of allLaps) {
-      const split = lap.splits[i]!;
+      const split = lap.splits[i];
       if (best === null || split < best) best = split;
     }
-    return { last: latestLap.splits[i]!, best };
+    return { last: latestLap.splits[i], best };
   }) as [SectorAgg, SectorAgg, SectorAgg, SectorAgg];
 
   return {

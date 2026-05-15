@@ -13,7 +13,9 @@ export function DebugPage() {
   return (
     <div>
       <p>connection: {state.connection}</p>
-      <pre><code>{JSON.stringify(state, null, 2)}</code></pre>
+      <pre>
+        <code>{JSON.stringify(state, null, 2)}</code>
+      </pre>
     </div>
   );
 }

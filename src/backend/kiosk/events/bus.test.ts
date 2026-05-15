@@ -55,9 +55,9 @@ test("emit does not throw when a listener throws", () => {
   expect(() => bus.emit("lap", sampleLap)).not.toThrow();
 });
 
-// @ts-expect-error — intentionally wrong type: lap field must be number, not string
 const _typeCheck: () => void = () =>
   new TypedEventBus<RaceEventMap>().emit("lap", {
+    // @ts-expect-error — intentionally wrong type: lap field must be number, not string
     lap: "oops",
     timeSec: 0,
     splits: [0, 0, 0, 0],

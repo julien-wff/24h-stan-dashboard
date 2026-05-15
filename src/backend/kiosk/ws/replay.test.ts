@@ -33,13 +33,14 @@ afterAll(() => {
   rmSync(tmpDir, { recursive: true, force: true });
 });
 
-function insertRawPacket() {
+function insertRawPacket(): number {
   const [row] = db
     .insert(rawPackets)
     .values({ seq: 1, receivedAt: Date.now(), payload: "{}" })
     .returning({ id: rawPackets.id })
     .all();
-  return row!.id;
+  if (!row) throw new Error("insertRawPacket: expected returning row");
+  return row.id;
 }
 
 function insertSample(overrides: { fix?: number; t?: number } = {}) {
@@ -66,7 +67,8 @@ function insertSample(overrides: { fix?: number; t?: number } = {}) {
     })
     .returning()
     .all();
-  return row!;
+  if (!row) throw new Error("insertSample: expected returning row");
+  return row;
 }
 
 function insertLap(lap: number) {
@@ -96,7 +98,7 @@ test("laps only returns ordered lap updates", () => {
 
   const result = buildReplay({ db, centerline: mockCenterline });
   expect(result).toHaveLength(3);
-  expect(result[0]!.type).toBe("lap");
+  expect(result[0]?.type).toBe("lap");
   expect((result[0] as { lap: number }).lap).toBe(1);
   expect((result[1] as { lap: number }).lap).toBe(2);
   expect((result[2] as { lap: number }).lap).toBe(3);
@@ -108,8 +110,9 @@ test("sample with fix !== 0 is appended as a tick after laps", () => {
 
   const result = buildReplay({ db, centerline: mockCenterline });
   expect(result).toHaveLength(2);
-  expect(result[0]!.type).toBe("lap");
-  const tick = result[1]!;
+  expect(result[0]?.type).toBe("lap");
+  const tick = result[1];
+  if (!tick) throw new Error("expected a tick after lap");
   expect(tick.type).toBe("tick");
   if (tick.type === "tick") {
     expect(tick.t).toBe(9999);
@@ -130,7 +133,8 @@ test("latest sample by id is used when multiple samples exist", () => {
 
   const result = buildReplay({ db, centerline: mockCenterline });
   expect(result).toHaveLength(1);
-  const tick = result[0]!;
+  const tick = result[0];
+  if (!tick) throw new Error("expected a tick");
   expect(tick.type).toBe("tick");
   if (tick.type === "tick") {
     expect(tick.t).toBe(9999);

@@ -28,7 +28,8 @@ test("file with fewer than two trkpt points throws", () => {
 
 test("project() of the first track point returns s ≈ 0 and sector === 0", () => {
   const centerline = loadCenterline(TRACK_PATH);
-  const first = centerline.points[0]!;
+  const first = centerline.points[0];
+  if (!first) throw new Error("expected centerline points");
   const { s, sector } = centerline.project(first.lat, first.lon);
   expect(s).toBeCloseTo(0, 3);
   expect(sector).toBe(0);
@@ -72,8 +73,9 @@ function findPointAtS(
   targetM: number,
 ): { lat: number; lon: number } {
   for (let i = 0; i < points.length - 1; i++) {
-    const a = points[i]!;
-    const b = points[i + 1]!;
+    const a = points[i];
+    const b = points[i + 1];
+    if (!a || !b) continue;
     if (a.cumulativeMeters <= targetM && targetM <= b.cumulativeMeters) {
       const t = (targetM - a.cumulativeMeters) / (b.cumulativeMeters - a.cumulativeMeters);
       return {
@@ -82,5 +84,7 @@ function findPointAtS(
       };
     }
   }
-  return points[points.length - 1]!;
+  const last = points[points.length - 1];
+  if (!last) throw new Error("expected centerline points");
+  return last;
 }

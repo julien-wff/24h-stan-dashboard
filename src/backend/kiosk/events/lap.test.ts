@@ -97,7 +97,7 @@ test("lap 1 is emitted at the second boundary with correct lap number", () => {
   for (const s of samples) detector.handleSample(s);
 
   expect(events.length).toBe(1);
-  expect(events[0]!.lap).toBe(1);
+  expect(events[0]?.lap).toBe(1);
 });
 
 test("splits sum to timeSec within 1e-6", () => {
@@ -109,7 +109,8 @@ test("splits sum to timeSec within 1e-6", () => {
   const samples = driveTrack(centerline, 2, 1000);
   for (const s of samples) detector.handleSample(s);
 
-  const event = events[0]!;
+  const event = events[0];
+  if (!event) throw new Error("expected at least one lap event");
   const splitsSum = event.splits.reduce((a, b) => a + b, 0);
   expect(Math.abs(event.timeSec - splitsSum)).toBeLessThan(1e-6);
 });
@@ -124,8 +125,8 @@ test("two full laps emit events with lap numbers 1 and 2 in order", () => {
   for (const s of samples) detector.handleSample(s);
 
   expect(events.length).toBe(2);
-  expect(events[0]!.lap).toBe(1);
-  expect(events[1]!.lap).toBe(2);
+  expect(events[0]?.lap).toBe(1);
+  expect(events[1]?.lap).toBe(2);
 });
 
 test("fix === 0 samples are ignored: no state change and no lap", () => {
@@ -134,7 +135,8 @@ test("fix === 0 samples are ignored: no state change and no lap", () => {
   const { bus, events } = makeBus();
   const detector = createLapDetector({ db, centerline, bus });
 
-  const pt0 = centerline.points[0]!;
+  const pt0 = centerline.points[0];
+  if (!pt0) throw new Error("expected centerline points");
   const noFixSample = makeSample(pt0.lat, pt0.lon, 1000, 0);
 
   detector.handleSample(noFixSample);
@@ -155,8 +157,9 @@ test("GPS jitter near the start line does not fire a spurious lap (less than min
   expect(events.length).toBe(0);
 
   // Jitter near the start line: only a few steps (much less than 90% of a lap)
-  const pt0 = centerline.points[0]!;
-  const pt1 = centerline.points[1]!;
+  const pt0 = centerline.points[0];
+  const pt1 = centerline.points[1];
+  if (!pt0 || !pt1) throw new Error("expected centerline points");
   let t = 1000 + warmupSamples.length;
   for (let i = 0; i < 5; i++) {
     detector.handleSample(makeSample(pt0.lat, pt0.lon, t++));
@@ -191,7 +194,7 @@ test("insert failure suppresses the event but advances the counter", () => {
           return (target as typeof db).insert(table as Parameters<typeof target.insert>[0]);
         };
       }
-      return (target as Record<string | symbol, unknown>)[prop as string];
+      return (target as unknown as Record<string | symbol, unknown>)[prop as string];
     },
   }) as typeof db;
 
@@ -203,7 +206,7 @@ test("insert failure suppresses the event but advances the counter", () => {
 
   // Lap 1 insert failed → event suppressed. Lap 2 insert succeeded → event emitted with lap=2
   expect(events.length).toBe(1);
-  expect(events[0]!.lap).toBe(2);
+  expect(events[0]?.lap).toBe(2);
 });
 
 test("construction with pre-populated DB resumes lap counter from MAX(lap) + 1", () => {
@@ -232,7 +235,7 @@ test("construction with pre-populated DB resumes lap counter from MAX(lap) + 1",
   for (const s of samples) detector.handleSample(s);
 
   expect(events.length).toBe(1);
-  expect(events[0]!.lap).toBe(8);
+  expect(events[0]?.lap).toBe(8);
 });
 
 test("emitted lap event is persisted before emit (DB row visible inside handler)", () => {

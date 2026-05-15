@@ -68,8 +68,8 @@ test("bestLap tracks minimum timeSec", () => {
   state = reduce(state, makeLap(2, 90));
   state = reduce(state, makeLap(3, 92));
 
-  expect(state.bestLap!.timeSec).toBe(90);
-  expect(state.bestLap!.lap).toBe(2);
+  expect(state.bestLap?.timeSec).toBe(90);
+  expect(state.bestLap?.lap).toBe(2);
 });
 
 test("duplicate lap is idempotent", () => {
@@ -78,7 +78,7 @@ test("duplicate lap is idempotent", () => {
   const state2 = reduce(state1, lap);
 
   expect(Object.keys(state2.laps)).toHaveLength(1);
-  expect(state2.bestLap!.timeSec).toBe(90);
+  expect(state2.bestLap?.timeSec).toBe(90);
   expect(state2.recentLaps).toHaveLength(1);
 });
 
@@ -100,8 +100,8 @@ test("recentLaps caps at 8", () => {
   }
 
   expect(state.recentLaps).toHaveLength(8);
-  expect(state.recentLaps[0]!.lap).toBe(5);
-  expect(state.recentLaps[7]!.lap).toBe(12);
+  expect(state.recentLaps[0]?.lap).toBe(5);
+  expect(state.recentLaps[7]?.lap).toBe(12);
 });
 
 test("tick does not mutate state", () => {
